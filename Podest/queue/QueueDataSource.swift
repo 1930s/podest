@@ -10,7 +10,7 @@ import UIKit
 import FeedKit
 import os.log
 
-private let log = OSLog(subsystem: "ink.codes.podest", category: "queue")
+private let log = OSLog.disabled
 
 /// Provides access to queue and subscription data.
 final class QueueDataSource: NSObject, SectionedDataSource {
@@ -64,11 +64,15 @@ final class QueueDataSource: NSObject, SectionedDataSource {
   }
   
   private let userQueue: Queueing
+
   private let images: Images
+
+  private let imageQuality: ImageQuality
   
-  init(userQueue: Queueing, images: Images) {
+  init(userQueue: Queueing, images: Images, imageQuality: ImageQuality = .medium) {
     self.userQueue = userQueue
     self.images = images
+    self.imageQuality = imageQuality
     
     super.init()
   }
@@ -421,7 +425,7 @@ extension QueueDataSource: UITableViewDataSource {
 
       cell.images = Podest.images
       cell.item = entry
-      cell.imageQuality = .high
+      cell.imageQuality = imageQuality
 
       cell.textLabel?.text = entry.feedTitle ?? entry.title
       cell.detailTextLabel?.text = entry.title
@@ -544,30 +548,40 @@ extension QueueDataSource: UITableViewDataSourcePrefetching  {
   func tableView(
     _ tableView: UITableView,
     prefetchRowsAt indexPaths: [IndexPath]) {
-    let images = self.images
+    // Assuming the the first row is representative.
+    let ip = IndexPath(row: 0, section: 0)
+    let tmp = !self.isEmpty ? tableView.cellForRow(at: ip) : nil
+    let size = tmp?.imageView?.bounds.size ?? CGSize(width: 82, height: 82)
 
-    // Jumping through extra hoops for smooth scrolling is worth it.
+    // Questionable if this extra dispatching, here and in the next method,
+    // saves any time.
 
-    DispatchQueue.global().async {
-      let items = self.imaginables(for: indexPaths)
-      let size = CGSize(width: 60, height: 60)
-      let reqs = images.prefetchImages(for: items, at: size, quality: .medium)
-      self.requests = reqs
+    DispatchQueue.global().async { [weak self] in
+      guard
+        let images = self?.images,
+        let quality = self?.imageQuality,
+        let items = self?.imaginables(for: indexPaths) else {
+        return
+      }
+
+      let reqs = images.prefetchImages(for: items, at: size, quality: quality)
+
+      self?.requests = reqs
     }
   }
   
   func tableView(
     _ tableView: UITableView,
     cancelPrefetchingForRowsAt indexPaths: [IndexPath]) {
-    let images = self.images
-
-    DispatchQueue.global().async {
-      guard let reqs = self.requests else {
+    DispatchQueue.global().async { [weak self] in
+      guard let reqs = self?.requests else {
         return
       }
+
       // Ignoring indexPaths, relying on the repo to do the right thing.
-      images.cancel(prefetching: reqs)
-      self.requests = nil
+      
+      self?.images.cancel(prefetching: reqs)
+      self?.requests = nil
     }
   }
   

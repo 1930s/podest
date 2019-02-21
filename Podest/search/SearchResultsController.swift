@@ -9,23 +9,23 @@
 import FeedKit
 import Foundation
 import UIKit
-import os.log
-
-private let log = OSLog.disabled
 
 protocol SearchResultsControllerDelegate: Navigator {
 
-  /// Communicating back selections from the list of search results.
-  func searchResultsController(
-    _ searchResultsController: SearchResultsController,
+  /// Forwards table view selection.
+  func searchResults(
+    _ searchResults: SearchResultsController,
     didSelectFind: Find
   )
+
+  /// Forwards scroll view begin dragging event.
+  func searchResultsWillBeginDragging(
+    _ searchResults: SearchResultsController)
 
   /// The main split view controller state.
   ///
   /// In landscape, episodes can be selected, flipping to portrait must clear
-  /// these selections in place, for `viewDidAppear(_:)` not happening in that
-  /// case.
+  /// these selections in place.
   var isCollapsed: Bool { get }
 
 }
@@ -36,33 +36,30 @@ final class SearchResultsController: UITableViewController {
 
   var delegate: SearchResultsControllerDelegate?
 
-  /// Returns a shared completion block for updating.
-  private func makeUpdatingBlock()
-    -> (([[Change<SearchResultsDataSource.Item>]], Error?) -> Void) {
-    return { [weak self] batch, error in
-      // There must be a smarter place for adjusting insets.
-      self?.adjustInsets()
+  private func makeReloadBlock() -> () -> Void {
+    return { [weak self] in
+      self?.tableView.reloadData()
 
-      guard let tv = self?.tableView else {
+      let zero = IndexPath(row: 0, section: 0)
+
+      guard self?.dataSource.findAt(indexPath: zero) != nil else {
         return
       }
 
-      UIView.performWithoutAnimation {
-        self?.dataSource.commit(batch, performingWith: .table(tv))
-      }
+      self?.tableView.scrollToRow(at: zero, at: .top, animated: false)
     }
   }
 
   func search(_ term: String) {
-    dataSource.search(term: term, updatesBlock: makeUpdatingBlock())
+    dataSource.search(term: term, reloadBlock: makeReloadBlock())
   }
 
   func suggest(_ term: String) {
-    dataSource.suggest(term: term, updatesBlock: makeUpdatingBlock())
+    dataSource.suggest(term: term, reloadBlock: makeReloadBlock())
   }
   
   func reset() {
-    dataSource.suggest(term: "", updatesBlock: makeUpdatingBlock())
+    suggest("")
   }
 
 }
@@ -137,6 +134,16 @@ extension SearchResultsController {
   
 }
 
+// MARK: - UIScrollViewDelegate
+
+extension SearchResultsController {
+
+  override func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+    delegate?.searchResultsWillBeginDragging(self)
+  }
+  
+}
+
 // MARK: - UITableViewDelegate
 
 extension SearchResultsController {
@@ -158,7 +165,7 @@ extension SearchResultsController {
       fatalError("no item at index path: \(indexPath)")
     }
 
-    delegate?.searchResultsController(self, didSelectFind: find)
+    delegate?.searchResults(self, didSelectFind: find)
   }
 
 }
